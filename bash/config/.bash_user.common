@@ -1,0 +1,64 @@
+# User specific aliases, functions, and configuration
+
+### Environment variables
+# Add devtools directories to PATH
+PATH=$PATH:~/git/devtools
+PATH=$PATH:~/git/devtools/bash
+PATH=$PATH:~/git/devtools/xdebug
+
+# Set emacs as our default editor
+export EDITOR=emacs
+export RMATE_PORT=$(( 52000 + $(cksum <<<$(echo $USER) | cut -d' ' -f1 | ( read CRC; echo $(( CRC % 1000 )) ) ) ))
+
+### Aliases
+alias ls='ls -hF --color=tty'
+alias ll='ls -al'
+alias e=$EDITOR
+alias cb='clipboard'
+
+# Get a better 'cd'
+. ~/git/devtools/bash/cd.sh
+
+### Functions
+function _complete_ssh_hosts() {
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	comp_ssh_hosts=$(
+		if [ -f ~/.ssh/config ]; then
+			sed -En "s/\*.*$//; s/^Host=(.)/\1/p" ~/.ssh/config
+		fi
+		sed '/^#/d; s/^  *//; s/[, ].*//; /\[/d' ~/.ssh/known_hosts | uniq
+	)
+	COMPREPLY=( $(compgen -W "${comp_ssh_hosts}" -- $cur) )
+}
+complete -F _complete_ssh_hosts ssh
+
+function _complete_pdsh_hosts() {
+	cur="${COMP_WORDS[COMP_CWORD]}"
+	comp_pdsh_hosts=$(
+		cat ~/.pdsh
+	)
+	COMPREPLY=( $(compgen -W "${comp_pdsh_hosts}" -- $cur) )
+}
+complete -F _complete_pdsh_hosts pdsh
+
+# xdebug a page
+# usage: xd <url> [<IDEkey>]
+function xd() {
+	local IDEkey=${2}
+	if [ -z ${IDEkey} ]; then
+		IDEkey=${USER}
+	fi
+	echo -e "Debugging: IDEkey = ${IDEkey}\n"
+	echo "wget -q -O- ${1}?XDEBUG_SESSION_START=${IDEkey}"
+	wget -q -O- ${1}?XDEBUG_SESSION_START=${IDEkey}
+}
+
+function show_listeners() {
+    sudo netstat -tulpn
+}
+
+# Command prompt
+function ps1-git() {
+	# placeholder in case ps1-git.sh is not present yet
+	echo -e '\e[0m(no ps1-git)'
+}

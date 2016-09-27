@@ -1,0 +1,14 @@
+#! /bin/sh
+
+# Use this script for access to the OS clipboard on Cygwin & Mac. 
+# All others just a use a user file for temporary storage.
+#
+# Examples:
+#   echo "I'm going to the clipboard" | clipboard    # Writes to the clipboard and stdout
+#   clipboard                                        # Reads from the clipboard to stdout
+
+case $(uname -s) in
+    CYGWIN_NT* ) [[ -t 0 ]] && cat /dev/clipboard || cat | tee /dev/clipboard ;;
+    Darwin* )    [[ -t 0 ]] && pbpaste || cat | pbcopy && pbpaste ;;
+    * ) touch ~/.clipboard;	[[ -t 0 ]] && cat ~/.clipboard || cat | tee ~/.clipboard ;;
+esac

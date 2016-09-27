@@ -1,0 +1,512 @@
+#! /bin/bash
+
+# Copyright © 2011
+# Josh Wilson
+# All Rights Reserved
+
+# Starts a process to periodically rsync specified directories.
+# It is started as a daemon by default, but can be started as a foreground process
+#
+# The general behavior is defined in config files.
+# It looks in both /usr/local/etc/fsync.conf and ~/.fsync
+#
+#   # Example config file
+#
+#   # Global options
+#   IGNORE=CVS .svn .git
+#   PERIOD=10
+#   FORCE_SYNC=300
+#
+#   # rsync mappings
+#   #   A single name can have both an up(->) and a down(<-) definition
+#   #   The remote directory uses ssh settings to identify the remote host (man ssh_config)
+#   #
+#   # name | rsync options | local directory (->|<-) remote directory | additional ignores
+#   #
+#   trunk | -rpgoz | /home/jowilson/myrepo/trunk/ -> remotehost:/home/jowilson/myrepo/trunk/ |
+#
+#   # A downward sync definition.
+#   # This will never be auto-sync'd. It must be explicitly invoked with -d.
+#   trunk | -rpgoz | /home/jowilson/myrepo/trunk/ <- remotehost:/home/jowilson/myrepo/trunk/ |
+#
+#   # While the local directory must always be local, the remote directory doesn't need to be remote
+#   bckp  | -rpgoz | /home/jowilson/myrepo/trunk/ -> /home/jowilson/myrepo/trunk_bckp/ |
+#
+#   # You can even specify that a single file be rsync'd
+#   single | -rpgoz | /home/jowilson/.bash_user -> ec2:/home/jowilson/ |
+#
+#   # You can also rename a file when transferring it, too.
+#   rename | -rpgoz | /home/jowilson/.bash_user -> ec2:/home/jowilson/.bashrc |
+#
+
+OPTIONS=":qcu:d:kw:vifh"
+
+function help() {
+    local OPTS=${OPTIONS:1}
+    echo "Usage: fsync [$(echo ${OPTS} | sed -e "s/\(.\)/-\\1 /g" -e "s/-:/<arg>/g" -e "s/ \$//g")]"
+    OPTS=$(echo ${OPTS} | sed -e "s/://g" -e "s/\(.\)/\\1 /g")
+    local OPT=;
+    for OPT in ${OPTS}; do
+	echo -n "  ${OPT}) "
+	case ${OPT} in
+	    q) echo "Signals current fsync process to display its current configuration settings.";;
+	    c) echo "Signals current fsync process to reload config files.";;
+	    u) echo "Signals current fsync process to force an upward sync for [<arg>]";;
+	    d) echo "Signals current fsync process to force a downward sync for [<arg>]";;
+	    k) echo "Signals current fsync process to shutdown.";;
+	    w) echo "Check every <arg> seconds for inbound signals. Default is 1";;
+	    v) echo "Sets output verbosity. Can be repeated 2 times.";;
+	    i) echo "Run an initial sync on startup for all upward mappings";;
+	    f) echo "Run as a foreground process.";;
+	    h) echo "Displays this help info.";;
+	esac
+    done
+    echo "Giving no options when there is already an active fsync process will trigger a resync of all upward mappings".
+}
+
+VERBOSE=0
+WAKE=1
+DAEMON=
+while getopts ${OPTIONS} OPT; do
+    case ${OPT} in
+	q) QUERY=;;
+	c) RELOAD=;;
+	u) OUTBOUND=${OPTARG};;
+	d) INBOUND=${OPTARG};;
+	k) KILL=;;
+	w) WAKE=${OPTARG};;
+	v) [[ ${VERBOSE} -lt 2 ]] && VERBOSE=$(( ${VERBOSE} + 1 ));;
+	i) INITIAL=;;
+	f) unset DAEMON;;
+	h) help; exit;;
+    esac
+done
+
+# Starting call of this script (see bottom of file)
+function singleton() {
+    # Try to guarantee that only one instance is running at any given time.
+    if [[ -e ~/.fsync_pid ]]; then
+	local PID=$(cat ~/.fsync_pid)
+	if [[ -z ${PID} ]]; then
+	    vout 0 "Empty file: ~/.fsync_pid. Remove and try again"
+	    exit 1
+	elif ps -p ${PID} >/dev/null 2>&1; then
+	    if anydefined KILL RELOAD QUERY OUTBOUND INBOUND; then
+		if alldefined RELOAD; then
+		    send_event ${PID} "Reloading config" "reload"
+		fi
+		if alldefined QUERY; then
+		    send_event ${PID} "Displaying current settings" "query"
+		fi
+		if alldefined OUTBOUND; then
+		    send_event ${PID} "Forcing outbound sync" "outbound $OUTBOUND"
+		fi
+		if alldefined INBOUND; then
+		    send_event ${PID} "Forcing inbound sync" "inbound $INBOUND"
+		fi
+		if alldefined KILL ; then
+		    send_event ${PID} "Stopping fsync" "stop"
+		fi
+	    else
+                send_event ${PID} "Global resync" "dispatch"
+	    fi
+	else
+	    vout 0 "Could not find process with PID defined in ~/.fsync_pid; PID=${PID}"
+	    exit 1
+	fi
+    elif ! anydefined QUERY INBOUND OUTBOUND RELOAD KILL; then
+	start
+    else
+	vout 0 "fsync not currently running"
+    fi
+}
+
+function start() {
+    # Choose whether to start as a standard process, or
+    # as a detached daemon process.
+    #
+    vout 2 -en "$(printf "%-12s" "start():")"
+    if alldefined DAEMON; then
+	vout 0 "Starting as daemon process"
+	main 1 &
+	if set -o noclobber && echo $! > ~/.fsync_pid 2>/dev/null; then
+	    set +o noclobber
+	    disown %1
+	else
+	    set +o noclobber
+	    vout 0 "Another fsync process already running: PID=$(cat ~/.fsync_pid)"
+	fi
+    else
+	if set -o noclobber && echo $$ > ~/.fsync_pid 2>/dev/null; then
+	    set +o noclobber
+	    vout 0 "Starting standard process"
+	else
+	    set +o noclobber
+	    vout 0 "Another fsync process already running: PID=$(cat ~/.fsync_pid)"
+	fi
+	main
+    fi
+}
+
+function cleanup() {
+    # Remove the file we use as our singleton lock
+    rm -f ~/.fsync_pid
+    rm -f ~/.fsync_fifo
+}
+
+function stop() {
+    # Breaks the main loop
+    unset ACTIVE
+}
+
+function main() {
+    # signal registration, configuration, and main loop
+    # $1 - if defined, it will daemonize the main process
+    trap "vout 0 \"fsync exitting\"; cleanup" EXIT
+    trap "vout 0 \"fsync reloading configs\"; config 0" HUP
+    trap "vout 0 \"fsync received stop signal\"; stop" INT TERM STOP
+
+    # Read in config files
+    config
+
+    # Outer loop: dispatch every $PERIOD seconds.
+    ACTIVE=
+    while alldefined ACTIVE; do
+	# spawn our various sync processes
+	dispatch
+
+	# Inner loop: take naps until $PERIOD has passed.
+	# Allows us to respond to inbound signals faster.
+	local SLEEP_TOTAL=0
+	while alldefined ACTIVE && [[ $SLEEP_TOTAL -lt $PERIOD ]]; do
+	    process_events ~/.fsync_fifo
+	    [[ $WAKE -ne 0 ]] && local NAP=$WAKE || local NAP=$PERIOD
+	    if [[ $(( $SLEEP_TOTAL + $NAP )) -gt $PERIOD ]]; then
+		let NAP=$PERIOD - $SLEEP_TOTAL
+	    fi
+	    sleep $NAP
+	    let SLEEP_TOTAL+=$NAP
+	done
+    done
+    vout 1 -e "fsync stopped"
+
+    # EXIT trap above doesn't seem to work when daemonized
+    [[ -n $1 ]] && vout 0 "fsync exitting"; cleanup
+}
+
+function send_event() {
+    # Send a message to the current fsync process and display any results on this terminal
+    # $1 - PID of this process
+    # $2 - Message describing the event
+    # $3 - The event
+    # $@ - Any extra items to be sent along with the event
+
+    local PID=$1
+    local COMMENT=$2
+    local EVENT=$3
+    shift 3
+
+    vout 0 -n "${COMMENT}: PID=${PID}"
+    echo "$$ ${EVENT} $@" >> ~/.fsync_fifo
+    while [[ ! -e /tmp/.fsync_response.$$ ]]; do
+	vout 0 -n "."
+	sleep 1
+    done
+    sleep 1 # give it another second to dump its info to the file
+
+    vout 0
+    cat /tmp/.fsync_response.$$
+    rm -f /tmp/.fsync_response.$$
+}
+
+function process_events() {
+    # Read an event file line by line and handle each event
+    # $1 - File to look in for any new events
+
+    local FIFO
+    if [[ -e $1 ]]; then
+	vout 2 "process_events($1)"
+	while read FIFO 2>/dev/null; do
+	    local RPID=${FIFO%% *}
+	    FIFO=${FIFO##${RPID} }
+	    vout 2 "process_event - RPID: $RPID, FIFO: $FIFO"
+	    local _VERBOSE=$VERBOSE
+	    [[ $VERBOSE -lt 1 ]] && VERBOSE=1
+	    case $FIFO in
+		query*)
+		    config_info 0 > /tmp/.fsync_response.${RPID}
+		    ;;
+		reload*)
+		    config 0 > /tmp/.fsync_response.${RPID}
+		    ;;
+		inbound*)
+		    local _NAME=${FIFO##inbound* }
+		    _NAME=${_NAME%% *}
+		    force $_NAME down > /tmp/.fsync_response.${RPID}
+		    ;;
+		outbound*)
+		    local _NAME=${FIFO##outbound* }
+		    _NAME=${_NAME%% *}
+		    force $_NAME up > /tmp/.fsync_response.${RPID}
+		    ;;
+		dispatch*)
+		    dispatch 1 > /tmp/.fsync_response.${RPID}
+		    ;;
+		stop*)
+		    stop > /tmp/.fsync_response.${RPID}
+		    ;;
+	    esac
+	    VERBOSE=$_VERBOSE
+	done < $1
+	rm -f $1
+    fi
+}
+
+function config() {
+    # Resets the configuration data from the config file
+    # $1 - set the verbosity level for the scope of this call (optional)
+    [[ -n $1 ]] && local V=$1 || local V=1
+
+    IGNORE=
+    PERIOD=5
+    FORCE_SYNC=300
+    COUNT=0
+
+    # Since bash doesn't really do associative arrays,
+    # we'll just keep parallel arrays for our three fields
+    NAME=()
+    RSOPTS=()
+    LOCALDIR=()
+    REMOTEDIR=()
+    DIRECTION=()
+    IGNORES=()
+    FIND_IGNORES=()
+    RSYNC_IGNORES=()
+
+    read_config /usr/local/etc/fsync.conf
+    read_config ~/.fsync
+
+    # Multiplex the ignore patterns to both rsync and find
+    local i=0
+    while [[ $i -lt ${#LOCALDIR[*]} ]]; do
+        # We need the extra ' ' at the end so that our inner while loop can end
+	local _IGNORE="${IGNORE} ${IGNORES[$i]} "
+	local FIND_IGNORE=
+        local RSYNC_IGNORE=
+
+	while [[ -n "$_IGNORE" ]]; do
+	    local ITEM=$(trim "${_IGNORE%% *}")
+	    ITEM=${ITEM#*_};
+	    if [[ "$ITEM" ]]; then
+		FIND_IGNORE="${FIND_IGNORE} -name '${ITEM}' -o"
+		RSYNC_IGNORE="${RSYNC_IGNORE} --exclude=${ITEM}"
+	    fi
+	    _IGNORE="${_IGNORE#* }"
+	done
+	FIND_IGNORE="${FIND_IGNORE:0:$((${#FIND_IGNORE} - 2))}" # remove trailing '-o'
+	FIND_IGNORES[$i]=${FIND_IGNORE}
+	RSYNC_IGNORES[$i]=${RSYNC_IGNORE}
+	let i++;
+    done
+
+    # Display the results
+    config_info $1
+}
+
+function read_config () {
+    # Parses a config file
+    # There are two types of functional lines:
+    #  1) Global settings: key/value pair
+    #  2) rsync mappings: name:localdir->remotedir
+    # You can comment a line with '#'
+
+    # Verify file exists
+    [[ -e $1 ]] || return 1
+
+    local LINE
+    while read LINE; do
+	case ${LINE} in
+	    # comment
+	    \#*) ;;
+
+	    # key/value
+	    *=*) case ${LINE%%=*} in
+                     IGNORE) IGNORE="${IGNORE} ${LINE#*=}";;
+                     PERIOD) PERIOD=${LINE#*=};;
+		     FORCE_SYNC) FORCE_SYNC=${LINE#*=};;
+		 esac
+                 ;;
+
+	    # rsync mapping
+	    *-\>*)
+                 NAME=( ${NAME[*]} ${LINE%%|*} );           LINE=${LINE#*|};
+		 RSOPTS=( ${RSOPTS[*]} ${LINE%%|*} );       LINE=${LINE#*|};
+	         LOCALDIR=( ${LOCALDIR[*]} ${LINE%%-\>*} ); LINE=${LINE#*-\>};
+		 DIRECTION=( ${DIRECTION[*]} "up" )
+	         REMOTEDIR=( ${REMOTEDIR[*]} ${LINE%%|*} ); LINE=$(trim ${LINE#*|});
+		 IGNORES=( ${IGNORES[*]} _${LINE} )
+	         ;;
+	    *\<-*)
+                 NAME=( ${NAME[*]} ${LINE%%|*} );           LINE=${LINE#*|};
+		 RSOPTS=( ${RSOPTS[*]} ${LINE%%|*} );       LINE=${LINE#*|};
+	         LOCALDIR=( ${LOCALDIR[*]} ${LINE%%\<-*} ); LINE=${LINE#*\<-};
+	         DIRECTION=( ${DIRECTION[*]} "down" )
+		 REMOTEDIR=( ${REMOTEDIR[*]} ${LINE%%|*} ); LINE=$(trim ${LINE#*|});
+		 IGNORES=( ${IGNORES[*]} _${LINE} )
+	         ;;
+	esac
+    done < ${1}
+
+    IGNORE=$(trim "$IGNORE")
+}
+
+function config_info() {
+    # Displays the current configuration settings
+    # $1 - set the verbosity level for the scope of this call (optional)
+    [[ -n $1 ]] && local V=$1 || local V=1
+
+    # Global values
+    vout $V -e "\nfsync settings: PID=$(cat ~/.fsync_pid)\n---------------"
+    vout $V "$(printf "%-12s= %s\n" IGNORE "$(trim "${IGNORE}")")"
+    vout $V "$(printf "%-12s= %s\n" PERIOD $(trim ${PERIOD}))"
+    vout $V "$(printf "%-12s= %s\n" FORCE_SYNC $(trim ${FORCE_SYNC}))"
+    vout $V
+    # all of the rsync mappings
+    local i=0
+
+    while [[ $i -lt ${#LOCALDIR[*]} ]]; do
+	[[ ${DIRECTION[$i]} == up ]] && local ARROW="->" || local ARROW="<-"
+	local _IGNORE=${IGNORES[$i]};
+	_IGNORE=${_IGNORE%%_*};
+	vout $V "$(printf "%-8s %-8s ${LOCALDIR[$i]} ${ARROW} ${REMOTEDIR[$i]} |${_IGNORE}\n" [${NAME[$i]}] "${RSOPTS[$i]}")"
+	i=$(($i+1))
+    done
+    vout $V "---------------"
+}
+
+function force() {
+    # Forces a sync of the given name and direction
+    # $1 - the name of the mapping to sync
+    # $2 - the direction to sync
+    vout 2 "force($1, $2)"
+
+    local i=0
+    while [[ $i -lt ${#LOCALDIR[*]} ]]; do
+	if [[ ${NAME[$i]} == $1 && ${DIRECTION[$i]} == $2 ]]; then
+	    check ${i} 1 &
+	    disown %1
+	fi
+	i=$(($i+1))
+    done
+
+}
+
+function dispatch() {
+    # Spawns a process for each rsync mapping in the conf file.
+    # $1 - if defined, will force a dispatch of all mappings
+    local FORCE=
+    if [[ ${COUNT} -ge ${FORCE_SYNC} ]] || [[ $1 ]] || alldefined INITIAL; then
+	unset INITIAL
+	FORCE=1
+	COUNT=0
+    fi
+
+    local i=0
+    while [[ $i -lt ${#LOCALDIR[*]} ]]; do
+	if [[ ${DIRECTION[$i]} == up ]]; then
+	    vout 2 "dispatch - ${DIRECTION[$i]} == up"
+	    check $i ${FORCE} &
+	    disown %1
+	else
+	    # We downward sync only on demand
+	    true
+	fi
+	let i++
+    done
+
+    let COUNT+=${PERIOD}
+}
+
+function check() {
+    # Look for recently changed files and if any are found initiate an rsync.
+    # $1 - index of the rsync map to sync.
+    # $2 - if not empty, will cause an rsynce regardless of any detected changes.
+    vout 2 "check($1, $2)"
+
+    TMP_FILENAMES=$(mktemp) && TMP_OUTPUT=$(mktemp) && {
+	trap "rm ${TMP_FILENAMES} ${TMP_OUTPUT}" EXIT
+	[[ ${DIRECTION[$i]} == up ]] && local ARROW="->" || local ARROW="<-"
+	if [[ ! -e ~/.fsync_last.${NAME[$1]} ]]; then
+	    vout 0 "fsync [${NAME[$1]}] : ${RSOPTS[$1]} : ${LOCALDIR[$1]} $ARROW ${REMOTEDIR[$1]}"
+	    sync ${1}
+	elif [[ $2 ]]; then
+	    vout 1 "fsync [${NAME[$1]}] : ${RSOPTS[$1]} : ${LOCALDIR[$1]} $ARROW ${REMOTEDIR[$1]} (forced)"
+	    sync ${1}
+	elif vout 2 "find ${LOCALDIR[$1]} \( ${FIND_IGNORES[$1]} \) -prune -o -newer ~/.fsync_last.${NAME[$1]} -print" && false; then
+	    true # No-op
+	elif [[ $(eval "find ${LOCALDIR[$1]} \( ${FIND_IGNORES[$1]} \) -prune -o -newer ~/.fsync_last.${NAME[$1]} -print" 2>/dev/null | tee ${TMP_FILENAMES} | wc -l) -ne 0 ]]; then
+
+	    vout 0 "$(date +[%I:%M:%S]) fsync [${NAME[$1]}] - detected"
+	    vout 1 "-----------------------------" >> ${TMP_OUTPUT}
+	    local LDIR=$(echo ${LOCALDIR[$1]} | sed -e "s/\//\\\\\//g")
+	    [[ $VERBOSE -ge 1 ]] && cat ${TMP_FILENAMES} | sed -e "s/^/  /" -e "s/${LDIR}//">> ${TMP_OUTPUT}
+	    sync ${1} >> ${TMP_OUTPUT}
+	    vout 1 "-----------------------------" >> ${TMP_OUTPUT}
+	    vout 0 "$(date +[%I:%M:%S]) fsync [${NAME[$1]}] - synced" >> ${TMP_OUTPUT}
+	    cat ${TMP_OUTPUT}
+	fi
+    }
+    rm -f ${TMP_FILENAMES} ${TMP_OUTPUT}
+}
+
+function sync() {
+    # rsync and mark the time so we can track when things change next.
+    # $1 - index of the rsync map to sync.
+
+    # We only mark our progress if we're uploading files
+    if [[ ${DIRECTION[$1]} == "up" ]]; then
+	touch ~/.fsync_last.${NAME[$1]}
+	vout 2 "sync($1) rsync ${RSOPTS[$1]} -e ssh ${RSYNC_IGNORES[$1]} ${LOCALDIR[$1]} ${REMOTEDIR[$1]}"
+	eval "rsync ${RSOPTS[$1]} -e ssh ${RSYNC_IGNORES[$1]} ${LOCALDIR[$1]} ${REMOTEDIR[$1]}" || rm -f ~/.fsync_last.${NAME[$1]}
+    else
+	vout 2 "sync($1) rsync ${RSOPTS[$1]} -e ssh ${RSYNC_IGNORES[$1]} ${REMOTEDIR[$1]} ${LOCALDIR[$1]}"
+	eval "rsync ${RSOPTS[$1]} -e ssh ${RSYNC_IGNORES[$1]} ${REMOTEDIR[$1]} ${LOCALDIR[$1]}"
+    fi
+}
+
+function alldefined() {
+    # Returns whether all the variables are defined or not
+    # $@ - variable names to check
+    local NAME
+    for NAME in $@; do
+	declare -p ${NAME} >/dev/null 2>&1 || return 1
+    done
+}
+
+function anydefined() {
+    # Returns whether any of the variables are defined or not
+    # $@ - variable names to check
+    local NAME
+    for NAME in $@; do
+	declare -p ${NAME} >/dev/null 2>&1 && return
+    done
+    return 1
+}
+
+function vout () {
+    # Verbose output helper.
+    # $1 - verbosity level (0=quiet, 1=general, 2=debug)
+    # $2 - message
+    LEVEL=$1; shift
+
+    [[ $LEVEL -le $VERBOSE ]] && echo "$@"
+}
+
+function trim() {
+    # Removes spaces from the ends of a string
+    # $1 - a string
+    local T="${1## }"
+    echo "${T%% }"
+}
+
+singleton

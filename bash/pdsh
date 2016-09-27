@@ -1,0 +1,4 @@
+#! /bin/bash
+
+[[ -z $@ ]] && ssh j ls ~/.dsh/group > ~/.pdsh && exit
+ssh j "pdsh -g $@"

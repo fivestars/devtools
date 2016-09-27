@@ -1,0 +1,84 @@
+#! /bin/sh
+
+# We can also stop listening if we don't specify a port
+KEY=$USER
+PORT=
+SUBSCRIPTIONS=
+PORT_MIN=9010
+PORT_MAX=9100
+while getopts :k:p:s OPT; do
+	case ${OPT} in
+		k) KEY=${OPTARG};;
+		p) PORT=${OPTARG};;
+		s) SUBSCRIPTIONS=1;;
+		*) echo "Unrecognized option: -${OPTARG}"; exit 2;;
+	esac
+done
+shift $(( OPTIND - 1 )); OPTIND=1
+
+# make sure the pydbgpproxy is running
+if [[ $(ps ax | grep "python .*/pydbgpproxy\$" | wc -l) -eq 0 ]]; then
+	echo "pydbgpproxy not running. Cannot continue."
+	exit 3
+fi
+
+touch /tmp/dbgpproxy_users
+if [[ -n ${SUBSCRIPTIONS} ]]; then
+	echo "pydbgpproxy subscriptions:"
+	echo "--------------------------"
+	sort /tmp/dbgpproxy_users
+	echo
+	exit 1
+fi
+
+if [[ $PORT == 0 ]]; then
+	# Stopping the proxy for us
+	sed -i "/^[[:digit:]]\+ ${KEY}\$/d" /tmp/dbgpproxy_users
+	echo "proxystop -k $KEY" | nc localhost 9001 >/dev/null
+	echo "Unsubscribed $KEY from pydbgpproxy"
+else
+
+	if [[ -z $PORT ]]; then
+		# Find a free port to use
+
+		# Look for claimed port
+		if LINE=$(grep " $KEY\$" /tmp/dbgpproxy_users); then
+			PORT=${LINE% *}
+			echo "Reusing port $PORT on remote server"
+		else
+			P=$PORT_MIN
+			while [[ $P -lt $PORT_MAX ]]; do
+				if ! grep "^$P " /tmp/dbgpproxy_users >/dev/null; then
+					PORT=$P
+					break
+				fi
+				P=$(( P + 1 ))
+			done
+
+			if [[ -z $PORT ]]; then
+			    echo "No free ports available in ${PORT_MIN}-${PORT_MAX}"
+			    exit 4
+			else
+				echo "Claiming port $PORT on remote server"
+			fi
+		fi
+	fi
+
+	# Attempt to start the proxy for us
+	if grep "^$PORT " /tmp/dbgpproxy_users >/dev/null; then
+		if ! grep "^$PORT $KEY\$" /tmp/dbgpproxy_users >/dev/null; then
+			echo "Port $PORT already in use by:"$(grep "^$PORT " /tmp/dbgpproxy_users | egrep -o " .*")
+			exit 5
+		fi
+	fi
+
+	# Remove our key, if present. Then add a new entry.
+	sed -i "/^[[:digit:]]\+ $KEY\$/d" /tmp/dbgpproxy_users
+	echo "$PORT $KEY" >> /tmp/dbgpproxy_users
+    
+	# Restart the proxy with this key and port	
+	echo "proxystop -k $KEY" | nc localhost 9001 >/dev/null
+	echo "proxyinit -k $KEY -p $PORT" | nc localhost 9001 >/dev/null
+	echo -n "Current pydbgpproxy subscription: "
+	grep " $KEY\$" /tmp/dbgpproxy_users
+fi

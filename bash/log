@@ -1,0 +1,22 @@
+#!/bin/sh
+
+COUNT=10
+while getopts "n:e" OPT; do
+	case $OPT in
+		n) COUNT=$OPTARG;;
+		e) $EDITOR ~/log; exit;;
+	esac
+done
+shift $((OPTIND-1))
+
+touch ~/log
+if [[ -n $@ ]]; then
+	if ! grep -q "$(date +"%A, %B %e %Y")" ~/log; then
+		echo >> ~/log
+		date +"%A, %B %e %Y" >> ~/log
+		echo '----------------------------------------' >> ~/log
+	fi
+	echo "$(date +%r): $@" >> ~/log
+fi
+
+tail -n $COUNT ~/log

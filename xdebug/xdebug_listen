@@ -1,0 +1,88 @@
+#! /bin/sh
+
+# Creates a reverse ssh tunnel to a remote host running PHP with xdebug.
+# Supports configurations with or without pydbgpproxy.
+# Must have a local copy of xdebug_subscribe 
+# Usage: xdebug_listen [options] host [hosts...]
+# Options:
+#   -k : The xdebug session key. The remote host and your IDE must agree on this value.
+#   -p : Remote port that pydbgpproxy will forward xdebug data and instructions to for the provide -k <key>
+#   -P : Like -p, but does not use pydbgpproxy. Instead, you must have configured xdebug to send data to this port 
+#         through some other means (vhost, php_ini, environment variable, ...). -k <key> will be ignored.
+#   -l : The local port that your IDE will be listening on for xdebug data.
+#   -s : List the current port subscriptions on the host
+KEY=$USER
+PORT=
+PORT_LOCAL=9000
+PYDBGPPROXY=1
+SUBSCRIPTIONS=
+while getopts :k:p:P:l:s OPT; do
+	case ${OPT} in
+		k) KEY=${OPTARG};;
+		P) PYDBGPPROXY=;&
+		p) PORT="${OPTARG}";;
+		l) PORT_LOCAL="${OPTARG}";;
+		s) SUBSCRIPTIONS="-${OPT}";;
+		*) echo "Unrecognized option: " ${OPTARG}; exit;;
+	esac
+done
+shift $(( OPTIND - 1 )); OPTIND=1
+
+HOSTS=( $@ )
+[[ -z ${HOSTS} ]] && HOSTS=pod
+
+# This generates a command string that we'll execute on the ssh connection
+# when using pydbgpproxy. We also send the text of xdebug_subscribe over 
+# the connection's stdin. If xdebug_subscribe is not found, we'll pipe stdin to 
+# a temporary file and execute it. This way, we don't have to depend on the
+# remote machine having xdebug_installed and on the $PATH.
+function generate_remote_command () {
+	echo -ne '
+if false && [[ -x $(command -v xdebug_subscribe 2>/dev/null) ]]; then
+    xdebug_subscribe=$(command -v xdebug_subscribe);
+else
+    xdebug_subscribe=$(mktemp);
+    trap "rm $xdebug_subscribe" EXIT;
+    chmod 755 $xdebug_subscribe;
+    cat >$xdebug_subscribe;
+fi;
+$xdebug_subscribe' -k $@
+}
+
+if [[ -n ${PYDBGPPROXY} ]]; then
+
+	[[ -n ${PORT} ]] && PORT_ARG="-p ${PORT}"
+
+	while [[ -n $HOSTS ]]; do
+		HOST=${HOSTS[0]}; HOSTS=( ${HOSTS[@]:1} )
+
+		# Send the local xdebug_subscribe up, in case the remote machine doesn't have it installed already.
+		# Then execute it with the given parameters
+		ssh ${HOST} $(generate_remote_command ${KEY} ${PORT_ARG} ${SUBSCRIPTIONS}) < ${BASH_SOURCE[0]%/*}/xdebug_subscribe | tee /tmp/xdebug_listen
+		STATUS=${PIPESTATUS[0]}
+
+		if [[ ${PORT} != 0 ]]; then
+			if [[ ${STATUS} > 1 ]]; then
+				echo "There was a problem with subscribing to pydbgpproxy: ${KEY} ${PORT}"
+			else
+				RESULT=$(grep "^Claiming\|^Reusing" /tmp/xdebug_listen) && PORT=${RESULT#*port } && PORT=${PORT%% *}
+				echo "Created ssh tunnel from ${HOST}:${PORT} to localhost:${PORT_LOCAL}"
+				if [[ -z $HOSTS ]]; then
+					echo
+		            autossh -M 0 -nNT -R ${PORT}:localhost:${PORT_LOCAL} ${HOST}
+		            echo "Detached ssh tunnel from pydbgpproxy, but still owner of ports in subscription files."
+		            echo "Call with -p 0 to relinquish ownership of those ports."
+				else
+					echo
+					autossh -M 0 -nNT -R ${PORT}:localhost:${PORT_LOCAL} ${HOST} &
+				fi
+				[[ -n $RESULT ]] && PORT=
+			fi
+		fi
+	done
+else
+	echo -e "Not using pydbgpproxy\nAssuming ${HOST} is configured to send xdebug data to port ${PORT}"
+	echo "Created ssh tunnel from ${HOST}:${PORT} to localhost:${PORT_LOCAL}"
+	autossh -M 0 -nNT -R ${PORT}:localhost:${PORT_LOCAL} ${HOST}
+	echo "Detached ssh tunnel"
+fi

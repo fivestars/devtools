@@ -1,0 +1,107 @@
+# User specific aliases, functions, and configuration
+
+# Determine our current location and load common configs
+LDIR=${BASH_SOURCE[0]}; while [[ -h "$LDIR" ]]; do LDIR=$(readlink "$LDIR"); done;
+LDIR=$(builtin cd -P $(dirname "$LDIR") && pwd)
+. $LDIR/.bash_user.common
+
+# Aliases
+alias dapi=~/git/devtools/dapi/dapi
+
+# Functions
+function set_title() {
+	echo -ne "\e]2;$@\a";
+}
+
+function sub() {
+	(/cygdrive/c/Program\ Files/Sublime\ Text\ 2/sublime_text.exe $* &)
+}
+
+function ssh() {
+	local RETURN OPT OPTARG OPTIND ARGS=$@
+
+	while getopts ":" OPT; do shift; done
+	eval set_title \${$OPTIND}
+	/usr/bin/ssh ${ARGS[@]}; RETURN=$?
+	set_title local
+
+	return $RETURN
+}
+
+function psh() {
+	local OPT OPTIND OPTARG SCREENRC=false
+	while getopts ":s" OPT; do
+		case $OPT in
+			s) SCREENRC=true;;
+		esac
+	done
+	shift $((OPTIND-1))
+
+	if $SCREENRC; then
+		cat <<- EOF | ssh $@ "cat >~/.screenrc"
+			escape "\`\`"
+			msgwait 1
+			multiuser on
+			bell_msg ""
+		EOF
+	fi
+
+	ssh -i ~/.ssh/id_rsa_screen $@
+}
+
+function vmip {
+	local CONFIG=~/.ssh/config
+	local STARTPOS=$(grep -n 'Host v\*' $CONFIG | cut -d: -f1)
+	local HOSTNAMEPOS=$(tail -n +$STARTPOS $CONFIG | grep -n HostName | head -n1 | cut -d: -f1)
+	local HOSTNAME=$(tail -n +$STARTPOS $CONFIG | grep HostName | head -n1 | awk '{ print $2; }')
+
+	if [[ -z $1 ]]; then
+		echo $HOSTNAME
+		return
+	fi
+
+	for (( i=0; i<=$(fgrep -o . <<<$1 | wc -l); ++i)); do
+		HOSTNAME=${HOSTNAME%.*}
+	done
+
+	exec 3>&1 >${CONFIG}.new
+	head -n $(( STARTPOS + HOSTNAMEPOS - 2 )) $CONFIG
+	echo -e "\tHostName ${HOSTNAME}.${1}"
+	tail -n +$(( STARTPOS + HOSTNAMEPOS )) $CONFIG
+	exec 1>&3
+
+	mv ${CONFIG}.new ${CONFIG}
+}
+
+# X11 support
+export DISPLAY=':0'
+
+# Command prompt
+function ps1-git() {
+	# placeholder in case ps1-git.sh is not present yet
+	echo -e '\e[0m(no ps1-git)'
+}
+. $LDIR/../ps1/ps1-success.sh
+[[ -e $LDIR/../ps1/ps1-git.sh ]] && . $LDIR/../ps1/ps1-git.sh
+
+function timer-start() {
+	TIMER=${TIMER:-$(date +%s%N)}
+	TIMER_AT=${TIMER_AT:-$(date +%T)}
+}
+
+function timer-finish() {
+	local ELAPSED=$(printf '%09d' $(( $(date +%s%N) - TIMER )))
+	local S=${ELAPSED:0:$(( ${#ELAPSED} - 9 ))}
+	TIMER_OUTPUT=$TIMER_AT+${S:-0}.${ELAPSED:$(( ${#ELAPSED} - 9 )):3}
+	unset TIMER TIMER_AT
+}
+
+trap timer-start DEBUG
+PROMPT_COMMAND=timer-finish
+
+export PS1='\n$TIMER_OUTPUT $(ps1-success)\[\e[1;33m\]\w$(ps1-git -l -s)\[\e[1;37m\]\n$\[\e[0m\] '
+
+# SSH Agent
+. $LDIR/../ssh_agent.sh ~/.ssh/id_rsa ~/.ssh/id_rsa_screen
+
+unset LDIR
