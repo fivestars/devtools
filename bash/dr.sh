@@ -244,14 +244,19 @@ function dr-shell {
 }
 
 function dr-boot {
-    local manager
+    local manager node
 
-    if [[ -f ~/.draoeu ]]; then
+    if [[ -f ~/.dr ]]; then
         manager=$(
             . ~/.dr >&2
 
             if [[ -n $DR_MACHINES ]]; then
-                docker-machine start ${DR_MACHINES[@]} >&2
+                for node in ${DR_MACHINES[@]}; do
+                    if [[ $(docker-machine status $node) != Running ]]; then
+                        docker-machine start $node >&2
+                    fi
+                done
+                # First one is assumed to be the manager
                 echo $DR_MACHINES
             fi
         )
@@ -299,10 +304,10 @@ function dr-create-node {
         return 1
     fi
 
-    # if docker-machine inspect $node &>/dev/null; then
-    #     printf "Node '$node' already exists\n" >&2
-    #     return 1
-    # fi
+    if docker-machine inspect $node &>/dev/null; then
+        printf "Node '$node' already exists\n" >&2
+        return 1
+    fi
 
     if [[ -n $swarm ]]; then
         if ! docker-machine inspect $swarm &>/dev/null; then

@@ -7,7 +7,7 @@ function sudo {
     fi
     prog="$1"
     shift
-    cygstart --action=runas $(which "$prog") "$@"
+    cygstart --hide --action=runas $(which "$prog") "$@"
 }
 
 if [[ $(basename ${BASH_SOURCE}) == $(basename $0) ]]; then
