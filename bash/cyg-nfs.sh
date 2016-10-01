@@ -1,3 +1,9 @@
+function boot-nfs {
+    if [[ ! -f ~/.nfs-restarted ||
+        $(date --date="$(<~/.nfs-restarted)" +%s) -lt $(date --date="$(uptime -s)" +%s) ]]; then
+        restart-nfs
+    fi
+}
 
 function restart-nfs {
     if net start | grep -qw rpcbind; then
@@ -5,6 +11,12 @@ function restart-nfs {
         while net start | grep -qw rpcbind; do :; done
     fi
 
+    check-nfs
+
+    date +"%Y-%m-%d %H:%M:%S" > ~/.nfs-restarted
+}
+
+function check-nfs {
     if ! net start | grep -qw mountd; then
         sudo net start mountd
         while ! net start | grep -qw mountd; do :; done
@@ -13,14 +25,5 @@ function restart-nfs {
     if ! net start | grep -qw nfsd; then
         sudo net start nfsd
         while ! net start | grep -qw nfsd; do :; done
-    fi
-
-    date +"%Y-%m-%d %H:%M:%S" > ~/.nfs-restarted
-}
-
-function boot-nfs {
-    if [[ ! -f ~/.nfs-restarted ||
-        $(date --date="$(<~/.nfs-restarted)" +%s) -lt $(date --date="$(uptime -s)" +%s) ]]; then
-        restart-nfs
     fi
 }
