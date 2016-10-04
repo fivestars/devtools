@@ -117,7 +117,7 @@ function dr-logs {
                 # container designation.
                 (
                     eval $(docker-machine env $node)
-                    docker logs ${@:1:$(( $# - 1 ))} $container |&
+                    docker logs ${@:1:$(( $# - 1 ))} $container 2>&1 |
                         sed "s/^/${container%.*}: /g"
                 ) &
             done < <(docker service ps $service | tail -n +2 | grep "Running" |
@@ -190,7 +190,7 @@ function dr-shell {
                             )
                             (
                                 eval $(docker-machine env $node)
-                                docker exec $container ${@:1:$#} |&
+                                docker exec $container ${@:1:$#} 2>&1 |
                                     sed "s/^/${container%.*}: /g"
                             ) &
                         done < <(docker service ps $service | tail -n +2 |
@@ -386,7 +386,7 @@ function dr {
         # Invoke the appropriate function in a subshell
         # (so bg jobs die with the function call)
         ( dr-$cmd $* )
-    elif docker-machine env $cmd |& grep -qv "Host does not exist"; then
+    elif docker-machine env $cmd 2>&1 | grep -qv "Host does not exist"; then
         # They are trying to use the dr-env shorthand?
         dr-env $cmd
     else
