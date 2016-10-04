@@ -292,8 +292,8 @@ function dr-create-node {
         case $OPT in
             i) ip_addr=$OPTARG;;
             s) as_manager=true;;
-            m) swarm=$OPTARG; as_manager=true;;
-            w) swarm=$OPTARG; as_worker=true;;
+            m) as_manager=true; swarm=$OPTARG;;
+            w) as_worker=true; swarm=$OPTARG;;
             *) return 1;;
         esac
     done
@@ -331,9 +331,9 @@ function dr-create-node {
     docker-machine-ipconfig static $node $ip_addr
     docker-machine-ipconfig hosts
 
-    printf "\nSharing your ~/ directory with the '%s'\n" $node
+    printf "\nSharing your ~/ directory with '%s'\n" $node
     printf "%s\n" "----------------------------------------"
-    docker-machine-nfs.sh $node -s=$HOME
+    docker-machine-nfs.sh $node
 
     if $as_manager; then
         if [[ -z $swarm ]]; then
@@ -397,6 +397,6 @@ function dr {
 
 # In case we want to call this script directly rather than sourcing it
 # (helpful when developing/debugging this script)
-if [[ $(basename -- $0) == $(basename $BASH_SOURCE) ]]; then
+if [[ $(basename -- $0) == $(basename -- $BASH_SOURCE) ]]; then
     dr $*
 fi
