@@ -397,6 +397,6 @@ function dr {
 
 # In case we want to call this script directly rather than sourcing it
 # (helpful when developing/debugging this script)
-if [[ $(basename $0) == $(basename $BASH_SOURCE) ]]; then
+if [[ $(basename -- $0) == $(basename $BASH_SOURCE) ]]; then
     dr $*
 fi
