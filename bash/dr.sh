@@ -61,11 +61,36 @@ Commands:
     Create a manager node for a new swarm:
         dr create-node myswarmmanager -s
 
-    Create a manager node for an existing swarm:
-        dr create-node mynewmanager -m myswarmmanager
+    Create a new manager node for an existing swarm:
+        dr create-node mymanager -m myswarmmanager
 
     Create a worker node for an existing swarm:
-        dr create-node mynewworker -w myswarmmanager
+        dr create-node myworker -w myswarmmanager
+
+  dr boot
+
+    Reads the contents of ~/.dr and starts all machines found in the DR_MACHINES
+    list. For example:
+        DR_MACHINES=(myswarmmanager mymanager myworker)
+
+  dr ecr <...>
+
+    Passes <...> as arguments to the 'aws ecr' command
+
+  dr ecr login
+
+    Retrieve and install temporary ECR credentials into your docker config.
+
+    These credentials are installed into the currently active docker engine.
+
+  dr ecr images [<repo short name>]
+
+    List the repositories and images available to your currently installed ECR
+    credentials.
+
+    ECR repositories URIs are of the form <path component>/<repo short name>. If
+    <repo short name> is provided to this command, it will display the images
+    for that repository only.
 
 EOF
 }
@@ -374,12 +399,54 @@ function dr-create-node {
     printf "%s\n" "----------------------------------------"
 }
 
+function dr-ecr-login {
+    eval $(aws ecr get-login --region us-east-1)
+}
+
+function dr-ecr-images {
+    if ! command -v jq &>/dev/null; then
+        printf "Missing jq command. Install it and try again" >&2
+        return 1
+    fi
+
+    local repo id
+
+    for repo in $(aws ecr describe-repositories | jq '.repositories[] | .repositoryUri' | xargs); do
+        [[ -n $1 && ${repo#*/} != $1 ]] && continue
+        printf "%s:\n" $repo
+        printf "  %20s %-71s %s\n" TAG DIGEST ID
+        while read tag digest; do
+            id=$(docker images --digests --format "{{.Tag}}\t{{.Digest}}\t{{.ID}}" |
+                grep "$tag.*$digest" | awk '{print $3}')
+            printf "  %20s %71s %s\n" $tag $digest "${id:-<not pulled yet>}"
+        done < <(
+            aws ecr list-images --repository-name ${repo#*/} |
+                jq '.imageIds[] | if has("imageTag") then . else empty end | objects | .imageTag, .imageDigest' |
+                xargs -n2)
+        printf "\n"
+    done
+}
+
+function dr-ecr {
+    local cmd=${1:-login}
+    shift
+
+    if command -v dr-ecr-$cmd &>/dev/null; then
+        dr-ecr-$cmd $*
+    else
+        aws ecr $cmd $*
+    fi
+}
+
 function dr {
     # $1 should correspond to one of the functions in this file
     local cmd=${1:-help}
     shift
 
-    if [[ "$cmd" == "boot" || "$cmd" == "create-node" ]]; then
+    # Commands that modify the environment
+    local bare_commands=("boot" "create-node" "env" "ecr")
+
+    if grep -qw "$cmd" <<<"${bare_commands[@]}"; then
         # These commands should run directly in the current shell's environment
         dr-$cmd $*
     elif command -v dr-$cmd &>/dev/null; then
