@@ -95,9 +95,85 @@ Commands:
 EOF
 }
 
+function dr-init {
+    (
+        if [[ -f ~/.dr ]]; then
+            . ~/.dr
+        fi
+
+        PS3="Select your driver [DR_DRIVER=$DR_DRIVER]: "
+        options=("xhyve/hyper-v" "docker-machine")
+        select opt in "${options[@]}"; do
+            case $opt in
+                "${options[0]}") DR_DRIVER="$opt"; break ;;
+                "${options[1]}") DR_DRIVER="$opt"; break ;;
+                *) printf "Choose a valid option $opt\n" ;;
+            esac
+        done
+        printf "\n"
+
+        if [[ $DR_DRIVER == "docker-machine" ]]; then
+            PS3="Choose machines to boot on startup [DR_MACHINES=(${DR_MACHINES[@]})]: "
+            options=$(docker-machine ls -f {{.Name}} | xargs -n1)
+            if [[ -n $options ]]; then
+                select opt in $options "-finalize-"; do
+                    case $opt in
+                        "-finalize-") break ;;
+                        "") printf "Choose a valid option\n" ;;
+                        *)  NEW_DR_MACHINES=(${DR_MACHINES[@]/$opt})
+                            if [[ ${DR_MACHINES[@]} == ${NEW_DR_MACHINES[@]} ]]; then
+                                DR_MACHINES+=($opt)
+                            else
+                                DR_MACHINES=(${DR_MACHINES[@]/$opt})
+                            fi
+                            PS3="Choose machines to boot on startup [DR_MACHINES=(${DR_MACHINES[@]})]: "
+                            ;;
+                    esac
+                done
+                printf "\n"
+
+                if [[ ${#DR_MACHINES[@]} -gt 1 ]]; then
+                    PS3="Choose the machine to attach to on startup [DR_MACHINE=${DR_MACHINE}]: "
+                    options="${DR_MACHINES[@]}"
+                    select opt in $options; do
+                        case $opt in
+                            "") printf "Choose a valid option\n" ;;
+                            *)  DR_MACHINE=$opt; break ;;
+                        esac
+                        PS3="Choose the machine to attach to on startup [DR_MACHINE=${DR_MACHINE}]: "
+                    done
+                    printf "\n"
+                fi
+            fi
+        fi
+
+        printf "Writing the following config to ~/.dr\n"
+        printf "%s\n" "--------------------------------------------------------------------------------"
+        tee ~/.dr <<EOF
+# The docker driver to use for the docker engine
+DR_DRIVER=$DR_DRIVER
+
+# If DR_DRIVER is docker-machine, these machines will start on "dr boot"
+DR_MACHINES=(${DR_MACHINES[@]})
+# If DR_DRIVER is docker-machine, this machine will be the initial docker engine"
+DR_MACHINE=$DR_MACHINE
+EOF
+    )
+        printf "%s\n" "--------------------------------------------------------------------------------"
+}
+
+function dr-using-machine {
+    (. ~/.dr; [[ $DR_DRIVER == docker-machine ]])
+}
+
 function dr-env {
     local node=$1
     shift
+
+    if ! dr-using-machine; then
+        printf "This command is only valid when using the docker-machine driver\n" >&2
+        return
+    fi
 
     if [[ $(docker-machine status $node) != Running ]]; then
         docker-machine start $node
@@ -134,14 +210,14 @@ function dr-logs {
 
                 # Find the container associated with the service instance
                 container=$(
-                    eval $(docker-machine env $node)
+                    dr-using-machine && eval $(docker-machine env $node)
                     docker ps --format "{{.Names}}" | grep "^$name"
                 )
 
                 # Output the logs, and prefix each line with its
                 # container designation.
                 (
-                    eval $(docker-machine env $node)
+                    dr-using-machine && eval $(docker-machine env $node)
                     docker logs ${@:1:$(( $# - 1 ))} $container 2>&1 |
                         sed "s/^/${container%.*}: /g"
                 ) &
@@ -160,7 +236,7 @@ function dr-logs {
                 node=$(docker service ps $service | tail -n +2 | grep $name |
                     awk '{ print $4 }')
                 (
-                    eval $(docker-machine env $node)
+                    dr-using-machine && eval $(docker-machine env $node)
                     docker logs ${@:1:$(( $# - 1 ))} $container
                 )
             else
@@ -210,11 +286,11 @@ function dr-shell {
                     if [[ "$choice" == "*" ]]; then
                         while read name node; do
                             container=$(
-                                eval $(docker-machine env $node)
+                                dr-using-machine && eval $(docker-machine env $node)
                                 docker ps --format "{{.Names}}" | grep "^$name"
                             )
                             (
-                                eval $(docker-machine env $node)
+                                dr-using-machine && eval $(docker-machine env $node)
                                 docker exec $container ${@:1:$#} 2>&1 |
                                     sed "s/^/${container%.*}: /g"
                             ) &
@@ -230,7 +306,7 @@ function dr-shell {
                     printf "Multiple containers found for '%s'\n" $service
                     printf "%s\n" "------------------------------------"
                     (
-                        eval $(docker-machine env loyalty)
+                        dr-using-machine && eval $(docker-machine env loyalty)
                         docker ps --format "table {{.Names}}\t{{.Status}}" |
                             tail -n +2 |
                             grep "$service\." |
@@ -247,7 +323,7 @@ function dr-shell {
                     return 1
                 fi
             fi
-            container=$(eval $(docker-machine env $node)
+            container=$(dr-using-machine && eval $(docker-machine env $node)
                         docker ps --format "{{.Names}}" | grep "^$name")
         else
             container=$service
@@ -260,7 +336,7 @@ function dr-shell {
             fi
         fi
         (
-            eval $(docker-machine env $node)
+            dr-using-machine && eval $(docker-machine env $node)
             docker exec -it $container ${*:-/bin/bash}
         )
     else
@@ -271,33 +347,36 @@ function dr-shell {
 function dr-boot {
     local manager node
 
-    if [[ -f ~/.dr ]]; then
-        manager=$(
-            . ~/.dr >&2
+    if ! dr-using-machine; then
+        printf "This command is only valid when using the docker-machine driver\n" >&2
+        return
+    fi
 
-            if [[ -n $DR_MACHINES ]]; then
-                for node in ${DR_MACHINES[@]}; do
-                    if [[ $(docker-machine status $node) != Running ]]; then
-                        docker-machine start $node >&2
-                    fi
-                done
-                # First one is assumed to be the manager
-                echo $DR_MACHINES
-            fi
-        )
+    manager=$(
+        . ~/.dr >&2
 
-        if [[ -n $manager ]]; then
-            dr-env $manager
+        if [[ -n $DR_MACHINES ]]; then
+            for node in ${DR_MACHINES[@]}; do
+                if [[ $(docker-machine status $node) != Running ]]; then
+                    docker-machine start $node >&2
+                fi
+            done
+            # First one is assumed to be the manager
+            echo $DR_MACHINES
         fi
-    else
-        printf "Create a ~/.dr file.\n" >&2
-        printf "DR_MACHINES: a list of machines to start on boot up.\n" >&2
-        printf "\tDR_MACHINES=(docker-machine-1 docker-machine-2 ...)\n" >&2
-        return 1
+    )
+
+    if [[ -n $manager ]]; then
+        dr-env $manager
     fi
 }
 
 function dr-create-node {
+    if ! dr-using-machine; then
+        printf "This command is only valid when using the docker-machine driver\n" >&2
+        return
+    fi
+
     if ! command -v docker-machine-ipconfig &>/dev/null; then
         printf "Could not find docker-machine-ipconfig\n" >&2
         return 1
@@ -443,6 +522,13 @@ function dr {
     local cmd=${1:-help}
     shift
 
+    # Check for presence of ~/.dr config file
+    if [[ ! -f ~/.dr ]]; then
+        printf "You must configure dr first\n\n"
+        dr-init
+        printf "\nRun 'dr init' to change these values\n"
+    fi
+
     # Commands that modify the environment
     local bare_commands=("boot" "create-node" "env" "ecr")
 
@@ -453,7 +539,8 @@ function dr {
         # Invoke the appropriate function in a subshell
         # (so bg jobs die with the function call)
         ( dr-$cmd $* )
-    elif docker-machine env $cmd 2>&1 | grep -qv "Host does not exist"; then
+    elif dr-using-machine && docker-machine env $cmd 2>&1 |
+                                grep -qv "Host does not exist"; then
         # They are trying to use the dr-env shorthand?
         dr-env $cmd
     else
