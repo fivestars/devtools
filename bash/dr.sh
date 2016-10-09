@@ -17,6 +17,9 @@ Commands:
 
     Point your docker client at the given <node>
 
+  dr config
+
+    Create and populate the ~/.dr configuration file.
 
   dr logs [-f] <service[.<instance number>]|container>
 
@@ -95,7 +98,7 @@ Commands:
 EOF
 }
 
-function dr-init {
+function dr-config {
     (
         if [[ -f ~/.dr ]]; then
             . ~/.dr
@@ -500,7 +503,7 @@ function dr-ecr-images {
             printf "  %20s %71s %s\n" $tag $digest "${id:-<not pulled yet>}"
         done < <(
             aws ecr list-images --repository-name ${repo#*/} |
-                jq '.imageIds[] | if has("imageTag") then . else empty end | objects | .imageTag, .imageDigest' |
+                jq '.imageIds[] | select(has("imageTag")) | .imageTag, .imageDigest' |
                 xargs -n2)
         printf "\n"
     done
@@ -525,8 +528,8 @@ function dr {
     # Check for presence of ~/.dr config file
     if [[ ! -f ~/.dr ]]; then
         printf "You must configure dr first\n\n"
-        dr-init
-        printf "\nRun 'dr init' to change these values\n"
+        dr-config
+        printf "\nRun 'dr config' to change these values\n"
     fi
 
     # Commands that modify the environment
