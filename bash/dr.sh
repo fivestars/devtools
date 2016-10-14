@@ -340,7 +340,7 @@ function dr-shell {
         fi
         (
             dr-using-machine && eval $(docker-machine env $node)
-            docker exec -it $container ${*:-/bin/bash}
+            docker exec -it $container ${*:-/bin/bash -l}
         )
     else
         docker exec -it $1 ${*:-/usr/bin/env bash}
