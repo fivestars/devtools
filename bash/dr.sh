@@ -275,7 +275,7 @@ function dr-shell {
         fi
 
         if docker service ps $service &>/dev/null; then
-            output=$(mktemp); trap "rm -f $output" EXIT
+            output=$(mktemp -d /tmp/dr.XXXX); trap "rm -f $output" EXIT
             docker service ps $service |
                 tail -n +2 |
                 grep "Running" |
