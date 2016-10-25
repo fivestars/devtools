@@ -340,10 +340,18 @@ function dr-shell {
         fi
         (
             dr-using-machine && eval $(docker-machine env $node)
-            docker exec -it $container ${*:-/bin/bash -l}
+            if [[ -n $* ]]; then
+                docker exec $container $*
+            else
+                docker exec -it $container /usr/bin/env bash -l
+            fi
         )
     else
-        docker exec -it $1 ${*:-/usr/bin/env bash}
+        if [[ -n $* ]]; then
+            docker exec $1 $*
+        else
+            docker exec -it $container /usr/bin/env bash -l
+        fi
     fi
 }
 
@@ -557,3 +565,6 @@ function dr {
 if [[ $(basename -- $0) == $(basename -- $BASH_SOURCE) ]]; then
     dr $*
 fi
+
+# Export our functions for use in sub-shells
+export -f $(grep '^function ' $BASH_SOURCE | awk '{ print $2 }' | xargs)
