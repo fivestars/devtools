@@ -567,4 +567,4 @@ if [[ $(basename -- $0) == $(basename -- $BASH_SOURCE) ]]; then
 fi
 
 # Export our functions for use in sub-shells
-export -f $(grep '^function ' $BASH_SOURCE | awk '{ print $2 }' | xargs)
+# export -f $(grep '^function ' $BASH_SOURCE | awk '{ print $2 }' | xargs)
