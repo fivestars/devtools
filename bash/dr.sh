@@ -2,7 +2,7 @@
 # Wrapper script to make working with services a little easier
 # Source this file to provide your shell with the "dr" function.
 
-function dr-help {
+function dr_help {
     cat <<EOF
 Wrapper for the docker command that makes it easier to work with swarm nodes
 and their services. Any unrecognized dr commands will be assumed to be docker
@@ -98,7 +98,7 @@ Commands:
 EOF
 }
 
-function dr-config {
+function dr_config {
     (
         if [[ -f ~/.dr ]]; then
             . ~/.dr
@@ -165,15 +165,15 @@ EOF
         printf "%s\n" "--------------------------------------------------------------------------------"
 }
 
-function dr-using-machine {
+function dr_using_machine {
     (. ~/.dr; [[ $DR_DRIVER == docker-machine ]])
 }
 
-function dr-env {
+function dr_env {
     local node=$1
     shift
 
-    if ! dr-using-machine; then
+    if ! dr_using_machine; then
         printf "This command is only valid when using the docker-machine driver\n" >&2
         return
     fi
@@ -189,7 +189,7 @@ function dr-env {
     eval $(docker-machine env $node)
 }
 
-function dr-logs {
+function dr_logs {
     local swarm=$(docker info | grep -q "Swarm: active" &&
                   echo true || echo false)
     local manager=$($swarm && docker info | grep -q "Is Manager: true" &&
@@ -213,14 +213,14 @@ function dr-logs {
 
                 # Find the container associated with the service instance
                 container=$(
-                    dr-using-machine && eval $(docker-machine env $node)
+                    dr_using_machine && eval $(docker-machine env $node)
                     docker ps --format "{{.Names}}" | grep "^$name"
                 )
 
                 # Output the logs, and prefix each line with its
                 # container designation.
                 (
-                    dr-using-machine && eval $(docker-machine env $node)
+                    dr_using_machine && eval $(docker-machine env $node)
                     docker logs ${@:1:$(( $# - 1 ))} $container 2>&1 |
                         sed "s/^/${container%.*}: /g"
                 ) &
@@ -239,7 +239,7 @@ function dr-logs {
                 node=$(docker service ps $service | tail -n +2 | grep $name |
                     awk '{ print $4 }')
                 (
-                    dr-using-machine && eval $(docker-machine env $node)
+                    dr_using_machine && eval $(docker-machine env $node)
                     docker logs ${@:1:$(( $# - 1 ))} $container
                 )
             else
@@ -253,7 +253,7 @@ function dr-logs {
     fi
 }
 
-function dr-shell {
+function dr_shell {
     local swarm=$(docker info | grep -q "Swarm: active" &&
                   echo true || echo false)
     local manager=$($swarm && docker info | grep -q "Is Manager: true" &&
@@ -275,7 +275,7 @@ function dr-shell {
         fi
 
         if docker service ps $service &>/dev/null; then
-            output=$(mktemp -t dr-shell.XXXX); trap "rm -f $output" EXIT
+            output=$(mktemp -t dr_shell.XXXX); trap "rm -f $output" EXIT
             docker service ps $service |
                 tail -n +2 |
                 grep "Running" |
@@ -289,11 +289,11 @@ function dr-shell {
                     if [[ "$choice" == "*" ]]; then
                         while read name node; do
                             container=$(
-                                dr-using-machine && eval $(docker-machine env $node)
+                                dr_using_machine && eval $(docker-machine env $node)
                                 docker ps --format "{{.Names}}" | grep "^$name"
                             )
                             (
-                                dr-using-machine && eval $(docker-machine env $node)
+                                dr_using_machine && eval $(docker-machine env $node)
                                 docker exec $container ${@:1:$#} 2>&1 |
                                     sed "s/^/${container%.*}: /g"
                             ) &
@@ -309,7 +309,7 @@ function dr-shell {
                     printf "Multiple containers found for '%s'\n" $service
                     printf "%s\n" "------------------------------------"
                     (
-                        dr-using-machine && eval $(docker-machine env loyalty)
+                        dr_using_machine && eval $(docker-machine env loyalty)
                         docker ps --format "table {{.Names}}\t{{.Status}}" |
                             tail -n +2 |
                             grep "$service\." |
@@ -326,7 +326,7 @@ function dr-shell {
                     return 1
                 fi
             fi
-            container=$(dr-using-machine && eval $(docker-machine env $node)
+            container=$(dr_using_machine && eval $(docker-machine env $node)
                         docker ps --format "{{.Names}}" | grep "^$name")
         else
             container=$service
@@ -339,7 +339,7 @@ function dr-shell {
             fi
         fi
         (
-            dr-using-machine && eval $(docker-machine env $node)
+            dr_using_machine && eval $(docker-machine env $node)
             if [[ -n $* ]]; then
                 docker exec $container $*
             else
@@ -355,10 +355,10 @@ function dr-shell {
     fi
 }
 
-function dr-boot {
+function dr_boot {
     local manager node
 
-    if ! dr-using-machine; then
+    if ! dr_using_machine; then
         printf "This command is only valid when using the docker-machine driver\n" >&2
         return
     fi
@@ -378,12 +378,12 @@ function dr-boot {
     )
 
     if [[ -n $manager ]]; then
-        dr-env $manager
+        dr_env $manager
     fi
 }
 
-function dr-create-node {
-    if ! dr-using-machine; then
+function dr_create_node {
+    if ! dr_using_machine; then
         printf "This command is only valid when using the docker-machine driver\n" >&2
         return
     fi
@@ -489,11 +489,11 @@ function dr-create-node {
     printf "%s\n" "----------------------------------------"
 }
 
-function dr-ecr-login {
+function dr_ecr_login {
     eval $(aws ecr get-login --region us-east-1)
 }
 
-function dr-ecr-images {
+function dr_ecr_images {
     if ! command -v jq &>/dev/null; then
         printf "Missing jq command. Install it and try again" >&2
         return 1
@@ -517,12 +517,12 @@ function dr-ecr-images {
     done
 }
 
-function dr-ecr {
+function dr_ecr {
     local cmd=${1:-login}
     shift
 
-    if command -v dr-ecr-$cmd &>/dev/null; then
-        dr-ecr-$cmd $*
+    if command -v dr_ecr_$cmd &>/dev/null; then
+        dr_ecr_$cmd $*
     else
         aws ecr $cmd $*
     fi
@@ -536,7 +536,7 @@ function dr {
     # Check for presence of ~/.dr config file
     if [[ ! -f ~/.dr ]]; then
         printf "You must configure dr first\n\n"
-        dr-config
+        dr_config
         printf "\nRun 'dr config' to change these values\n"
     fi
 
@@ -545,15 +545,15 @@ function dr {
 
     if grep -qw "$cmd" <<<"${bare_commands[@]}"; then
         # These commands should run directly in the current shell's environment
-        dr-$cmd $*
-    elif command -v dr-$cmd &>/dev/null; then
+        dr_$cmd $*
+    elif command -v dr_$cmd &>/dev/null; then
         # Invoke the appropriate function in a subshell
         # (so bg jobs die with the function call)
-        ( dr-$cmd $* )
-    elif dr-using-machine && docker-machine env $cmd 2>&1 |
+        ( dr_$cmd $* )
+    elif dr_using_machine && docker-machine env $cmd 2>&1 |
                                 grep -qv "Host does not exist"; then
-        # They are trying to use the dr-env shorthand?
-        dr-env $cmd
+        # They are trying to use the dr_env shorthand?
+        dr_env $cmd
     else
         # Fall back to docker
         docker $cmd $*
@@ -567,4 +567,4 @@ if [[ $(basename -- $0) == $(basename -- $BASH_SOURCE) ]]; then
 fi
 
 # Export our functions for use in sub-shells
-# export -f $(grep '^function ' $BASH_SOURCE | awk '{ print $2 }' | xargs)
+export -f $(grep '^function ' $BASH_SOURCE | awk '{ print $2 }' | xargs)
