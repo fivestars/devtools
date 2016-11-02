@@ -39,7 +39,7 @@ Commands:
 
     Open a bash shell on the given <service>, or run <command>, if given.
 
-  dr create-node <node> [-s] [-m <swarm>] [-w <swarm>]
+  dr create_node <node> [-s] [-m <swarm>] [-w <swarm>]
                         [-i <ip address>]
                         [-u <user id>:<group id>]
 
@@ -59,16 +59,16 @@ Commands:
     the node's user and group corresponding to the given ids.
 
     Create standard non-swarm node:
-        dr create-node mynode
+        dr create_node mynode
 
     Create a manager node for a new swarm:
-        dr create-node myswarmmanager -s
+        dr create_node myswarmmanager -s
 
     Create a new manager node for an existing swarm:
-        dr create-node mymanager -m myswarmmanager
+        dr create_node mymanager -m myswarmmanager
 
     Create a worker node for an existing swarm:
-        dr create-node myworker -w myswarmmanager
+        dr create_node myworker -w myswarmmanager
 
   dr boot
 
@@ -161,8 +161,14 @@ DR_MACHINES=(${DR_MACHINES[@]})
 # If DR_DRIVER is docker-machine, this machine will be the initial docker engine"
 DR_MACHINE=$DR_MACHINE
 EOF
+    printf "%s\n" "--------------------------------------------------------------------------------"
     )
-        printf "%s\n" "--------------------------------------------------------------------------------"
+
+    # Set up this shell as if it was started with these new settings
+    unset $(echo ${!DOCKER*})
+    if dr_using_machine; then
+        dr_boot
+    fi
 }
 
 function dr_using_machine {
@@ -340,18 +346,10 @@ function dr_shell {
         fi
         (
             dr_using_machine && eval $(docker-machine env $node)
-            if [[ -n $* ]]; then
-                docker exec $container $*
-            else
-                docker exec -it $container /usr/bin/env bash -l
-            fi
+            docker exec -it $container ${*:-/usr/bin/env bash -l}
         )
     else
-        if [[ -n $* ]]; then
-            docker exec $1 $*
-        else
-            docker exec -it $container /usr/bin/env bash -l
-        fi
+        docker exec -it $container ${*:-/usr/bin/env bash -l}
     fi
 }
 
@@ -541,7 +539,7 @@ function dr {
     fi
 
     # Commands that modify the environment
-    local bare_commands=("boot" "create-node" "env" "ecr")
+    local bare_commands=("boot" "config" "create_node" "env" "ecr")
 
     if grep -qw "$cmd" <<<"${bare_commands[@]}"; then
         # These commands should run directly in the current shell's environment
