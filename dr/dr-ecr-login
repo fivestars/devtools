@@ -1,0 +1,4 @@
+#! /usr/bin/env bash
+set -e
+
+eval $(aws ecr get-login --region us-east-1)

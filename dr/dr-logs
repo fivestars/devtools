@@ -1,0 +1,61 @@
+#! /usr/bin/env bash
+set -e
+
+swarm=$(docker info | grep -q "Swarm: active" && echo true || echo false)
+manager=$($swarm && docker info | grep -q "Is Manager: true" &&
+          echo true || echo false)
+
+if $manager; then
+    service=${@:$#:1}
+    choice=${service#*.}
+    service=${service%.*}
+    [[ $choice == $service ]] && choice=
+
+    if docker service ps $service &>/dev/null; then
+        # We are looking for the logs from a service
+        while read name node; do
+            # Did they specify a particular instance of the service?
+            if [[ -n $choice && $service.$choice != $name ]]; then
+                continue
+            fi
+
+            # Find the container associated with the service instance
+            container=$(
+                dr-using-machine && eval $(docker-machine env $node)
+                docker ps --format "{{.Names}}" | grep "^$name"
+            )
+
+            # Output the logs, and prefix each line with its
+            # container designation.
+            (
+                dr-using-machine && eval $(docker-machine env $node)
+                docker logs ${@:1:$(( $# - 1 ))} $container 2>&1 |
+                    sed "s/^/${container%.*}: /g"
+            ) &
+        done < <(docker service ps $service | tail -n +2 | grep "Running" |
+            grep -v "\\_" | awk '{ print $2" "$4 }')
+        wait
+    else
+        # The argument could be a single instance of the service (service.2)
+        # or just a raw container on the node itself
+        # (service.2.e0w8b8t2fa0vtyl4yxs3d2qu7).
+        container=$service
+        name=${container%.*}
+        service=${container%%.*}
+        if docker service ps $service &>/dev/null; then
+            # They are trying to get logs for an instance of a service
+            node=$(docker service ps $service | tail -n +2 | grep $name |
+                awk '{ print $4 }')
+            (
+                dr-using-machine && eval $(docker-machine env $node)
+                docker logs ${@:1:$(( $# - 1 ))} $container
+            )
+        else
+            # They are trying to get logs for a normal non-service
+            # container on the current node
+            docker logs $container
+        fi
+    fi
+else
+    docker logs $*
+fi

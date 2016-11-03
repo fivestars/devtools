@@ -1,0 +1,22 @@
+#! /usr/bin/env bash
+set -e
+
+if ! command -v jq &>/dev/null; then
+    printf "Missing jq command. Install it and try again" >&2
+    exit 1
+fi
+
+for repo in $(aws ecr describe-repositories | jq '.repositories[] | .repositoryUri' | xargs); do
+    [[ -n $1 && ${repo#*/} != $1 ]] && continue
+    printf "%s:\n" $repo
+    printf "  %20s %-71s %s\n" TAG DIGEST ID
+    while read tag digest; do
+        id=$(docker images --digests --format "{{.Tag}}\t{{.Digest}}\t{{.ID}}" |
+            grep "$tag.*$digest" | awk '{print $3}')
+        printf "  %20s %71s %s\n" $tag $digest "${id:-<not pulled yet>}"
+    done < <(
+        aws ecr list-images --repository-name ${repo#*/} |
+            jq '.imageIds[] | select(has("imageTag")) | .imageTag, .imageDigest' |
+            xargs -n2)
+    printf "\n"
+done

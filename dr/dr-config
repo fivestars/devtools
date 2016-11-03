@@ -1,0 +1,67 @@
+#! /usr/bin/env bash
+set -e
+
+if [[ -f ~/.dr ]]; then
+    . ~/.dr
+fi
+
+PS3="Select your driver [DR_DRIVER=$DR_DRIVER]: "
+options=("xhyve/hyper-v" "docker-machine")
+select opt in "${options[@]}"; do
+    case $opt in
+        "${options[0]}") DR_DRIVER="$opt"; break ;;
+        "${options[1]}") DR_DRIVER="$opt"; break ;;
+        *) printf "Choose a valid option $opt\n" ;;
+    esac
+done
+printf "\n"
+
+if [[ $DR_DRIVER == "docker-machine" ]]; then
+    PS3="Choose machines to boot on startup [DR_MACHINES=(${DR_MACHINES[@]})]: "
+    options=$(docker-machine ls -f {{.Name}} | xargs -n1)
+    if [[ -n $options ]]; then
+        select opt in $options "-finalize-"; do
+            case $opt in
+                "-finalize-") break ;;
+                "") printf "Choose a valid option\n" ;;
+                *)  NEW_DR_MACHINES=(${DR_MACHINES[@]/$opt})
+                    if [[ ${DR_MACHINES[@]} == ${NEW_DR_MACHINES[@]} ]]; then
+                        DR_MACHINES+=($opt)
+                    else
+                        DR_MACHINES=(${DR_MACHINES[@]/$opt})
+                    fi
+                    PS3="Choose machines to boot on startup [DR_MACHINES=(${DR_MACHINES[@]})]: "
+                    ;;
+            esac
+        done
+        printf "\n"
+
+        if [[ ${#DR_MACHINES[@]} -gt 1 ]]; then
+            PS3="Choose the machine to attach to on startup [DR_MACHINE=${DR_MACHINE}]: "
+            options="${DR_MACHINES[@]}"
+            select opt in $options; do
+                case $opt in
+                    "") printf "Choose a valid option\n" ;;
+                    *)  DR_MACHINE=$opt; break ;;
+                esac
+                PS3="Choose the machine to attach to on startup [DR_MACHINE=${DR_MACHINE}]: "
+            done
+            printf "\n"
+        else
+            DR_MACHINE=${DR_MACHINES}
+        fi
+    fi
+fi
+
+printf "Writing the following config to ~/.dr\n"
+printf "%s\n" "--------------------------------------------------------------------------------"
+tee ~/.dr <<EOF
+# The docker driver to use for the docker engine
+DR_DRIVER=$DR_DRIVER
+
+# If DR_DRIVER is docker-machine, these machines will start on "dr boot"
+DR_MACHINES=(${DR_MACHINES[@]})
+# If DR_DRIVER is docker-machine, this machine will be the initial docker engine"
+DR_MACHINE=$DR_MACHINE
+EOF
+printf "%s\n" "--------------------------------------------------------------------------------"

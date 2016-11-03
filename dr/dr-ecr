@@ -1,0 +1,11 @@
+#! /usr/bin/env bash
+set -e
+
+cmd=${1:-login}
+shift
+
+if command -v dr-ecr-$cmd &>/dev/null; then
+    dr-ecr-$cmd $*
+else
+    aws ecr $cmd $*
+fi

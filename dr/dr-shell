@@ -1,0 +1,97 @@
+#! /usr/bin/env bash
+set -e
+
+swarm=$(docker info | grep -q "Swarm: active" && echo true || echo false)
+manager=$($swarm && docker info | grep -q "Is Manager: true" &&
+          echo true || echo false)
+node=$DOCKER_MACHINE_NAME
+
+if $manager; then
+    service=$1
+    shift
+    choice="${service#*.}"
+    service=${service%.*}
+    [[ $choice == $service ]] && choice=
+
+    if [[ "$choice" == "*" && $# -eq 0 ]]; then
+        printf "Cannot open a shell on \"*\"." >&2
+        printf " Specify a service instance.\n" >&2
+        return 1
+    fi
+
+    if docker service ps $service &>/dev/null; then
+        output=$(mktemp -t dr_shell.XXXX); trap "rm -f $output" EXIT
+        docker service ps $service |
+            tail -n +2 |
+            grep "Running" |
+            grep -v "\\_" |
+            awk '{ print $2" "$4 }' > $output
+
+        if [[ $(wc -l <$output) -eq 1 ]]; then
+            read name node <$output
+        else
+            if [[ -n "$choice" ]]; then
+                if [[ "$choice" == "*" ]]; then
+                    while read name node; do
+                        container=$(
+                            dr-using-machine && eval $(docker-machine env $node)
+                            docker ps --format "{{.Names}}" | grep "^$name"
+                        )
+                        (
+                            dr-using-machine && eval $(docker-machine env $node)
+                            docker exec $container ${@:1:$#} 2>&1 |
+                                sed "s/^/${container%.*}: /g"
+                        ) &
+                    done < <(docker service ps $service | tail -n +2 |
+                             grep "Running" | grep -v "\\_" |
+                             awk '{ print $2" "$4 }')
+                    wait
+                    return
+                else
+                    read name node < <(grep "$service\.$choice" $output)
+                fi
+            else
+                printf "Multiple containers found for '%s'\n" $service
+                printf "%s\n" "------------------------------------"
+                (
+                    dr-using-machine && eval $(docker-machine env $node)
+                    docker ps --format "table {{.Names}}\t{{.Status}}" |
+                        tail -n +2 |
+                        grep "$service\." |
+                        sort |
+                        awk '{print NR ") " $0}'
+                )
+                printf "Choose (default=1): "
+                read choice
+                read name node < <(cat $output | tail -n +${choice:-1} |
+                                   head -n 1)
+            fi
+            if [[ -z $name ]];then
+                printf "Invalid choice\n" >&2
+                return 1
+            fi
+        fi
+        container=$(dr-using-machine && eval $(docker-machine env $node)
+                    docker ps --format "{{.Names}}" | grep "^$name")
+    else
+        container=$service
+        name=${container%.*}
+        service=${container%%.*}
+
+        if docker service ps $service &>/dev/null; then
+            node=$(docker service ps $service |
+                   tail -n +2 | grep $name | awk '{ print $4 }')
+        fi
+    fi
+
+    dr-using-machine && eval $(docker-machine env $node)
+fi
+
+# Don't allocate a tty for docker exec if we're not running from a tty context
+if [[ -t 0 ]]; then
+    docker exec -it $container ${*:-/usr/bin/env bash -l}
+else
+    # The lack of a tty means that SIGTERM events do not propagate to the
+    # container command. This can lead to orphaned processes in the container.
+    docker exec -i $container ${*:-/usr/bin/env bash -l}
+fi

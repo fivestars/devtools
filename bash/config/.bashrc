@@ -263,6 +263,11 @@ function ps1-git() {
     return
     echo -e '\e[0m(no ps1-git)'
 }
+function ps1-docker() {
+    # placeholder in case ps1-git.sh is not present yet
+    return
+    echo -e '\e[0m(no ps1-git)'
+}
 [[ -e $LDIR/../ps1/ps1-git.sh ]] && . $LDIR/../ps1/ps1-git.sh
 
 
@@ -277,7 +282,8 @@ if ! in_docker_container; then
     export PS1='\n$TIMER_OUTPUT $(ps1-success)\[\e[1;33m\]\w$(ps1-git -l -s)\033[0;37m$(ps1-docker)\[\e[1;37m\]\n$\[\e[0m\] '
 
     # Docker utilities
-    . $LDIR/../dr.sh
+    export PATH=${PATH}:$LDIR/../../dr
+    . $LDIR/../../dr/dr.sh
     dr boot
 
     # SSH Agent

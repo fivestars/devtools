@@ -1,0 +1,107 @@
+#! /usr/bin/env bash
+set -e
+
+if ! dr-using-machine; then
+    printf "This command is only valid when using the docker-machine driver\n" >&2
+    exit 1
+fi
+
+if ! command -v docker-machine-ipconfig &>/dev/null; then
+    printf "Could not find docker-machine-ipconfig\n" >&2
+    exit 1
+fi
+
+if ! command -v docker-machine-nfs.sh &>/dev/null; then
+    printf "Could not find docker-machine-nfs.sh\n" >&2
+    exit 1
+fi
+
+node=$1
+shift;
+
+as_manager=false
+as_worker=false
+while getopts "i:sm:w:" OPT; do
+    case $OPT in
+        i) ip_addr=$OPTARG;;
+        s) as_manager=true;;
+        m) as_manager=true; swarm=$OPTARG;;
+        w) as_worker=true; swarm=$OPTARG;;
+        *) exit 1;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [[ -z $node ]]; then
+    printf "Must provide the desired name of your new node\n" >&2
+    exit 1
+fi
+
+if docker-machine inspect $node &>/dev/null; then
+    printf "Node '$node' already exists\n" >&2
+    exit 1
+fi
+
+if [[ -n $swarm ]]; then
+    if ! docker-machine inspect $swarm &>/dev/null; then
+        printf "Node '$swarm' does not exist\n" >&2
+        exit 1
+    fi
+
+    if ! ( eval $(docker-machine env $swarm)
+           docker info | grep -q "Is Manager: true" ); then
+        printf "Node '$swarm' is not a swarm manager\n"
+        exit 1
+    fi
+fi
+
+printf "Creating node '%s'\n" $node
+printf "%s\n" "----------------------------------------"
+docker-machine create -d virtualbox $node
+
+printf "\nConfiguring '%s' to use static ip address %s\n" $node $ip_addr
+printf "%s\n" "----------------------------------------"
+docker-machine-ipconfig static $node $ip_addr
+docker-machine-ipconfig hosts
+
+printf "\nSharing your ~/ directory with '%s'\n" $node
+printf "%s\n" "----------------------------------------"
+docker-machine-nfs.sh $node
+
+if $as_manager; then
+    if [[ -z $swarm ]]; then
+        swarm=$node
+        printf "\nInitializing swarm with '%s' as a manager\n" $node
+        printf "%s\n" "----------------------------------------"
+        docker-machine ssh $node docker swarm init --advertise-addr \
+            $(docker-machine ls |
+                grep -w $node |
+                awk '{ print $5 }' |
+                sed 's/tcp:\/\/\(.*\):.*/\1/')
+
+    else
+        printf "\nJoining '%s' to swarm '%s' as a manager\n" $node $swarm
+        printf "%s\n" "----------------------------------------"
+        docker-machine ssh $node \
+            "$(docker-machine ssh $swarm docker swarm join-token manager |
+                tail -n +2)"
+    fi
+
+elif $as_worker; then
+    printf "\nJoining '%s' to swarm '%s' as a worker\n" $node $swarm
+    printf "%s\n" "----------------------------------------"
+    docker-machine ssh $node \
+        "$(docker-machine ssh $swarm docker swarm join-token worker |
+            tail -n +2)"
+fi
+
+if [[ -n $swarm ]]; then
+    printf "\nSwarm nodes\n"
+    printf "%s\n" "----------------------------------------"
+    eval $(docker-machine env $swarm)
+    docker node ls
+fi
+
+printf "\n%s\n" "----------------------------------------"
+printf "Finished creating node '%s'\n" $node
+printf "%s\n" "----------------------------------------"
