@@ -5,7 +5,7 @@ cmd=${1:-login}
 shift
 
 if command -v dr-ecr-$cmd &>/dev/null; then
-    dr-ecr-$cmd $*
+    dr-ecr-$cmd "$@"
 else
-    aws ecr $cmd $*
+    aws ecr $cmd "$@"
 fi

@@ -57,5 +57,5 @@ if $manager; then
         fi
     fi
 else
-    docker logs $*
+    docker logs "$@"
 fi

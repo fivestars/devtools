@@ -87,11 +87,18 @@ if $manager; then
     dr-using-machine && eval $(docker-machine env $node)
 fi
 
+# Start a bash login shell by default
+[[ -z "$@" ]] && set -- /usr/bin/env bash -l
+
 # Don't allocate a tty for docker exec if we're not running from a tty context
 if [[ -t 0 ]]; then
-    docker exec -it $container ${*:-/usr/bin/env bash -l}
+    docker exec -it $container "$@"
 else
     # The lack of a tty means that SIGTERM events do not propagate to the
     # container command. This can lead to orphaned processes in the container.
-    docker exec -i $container ${*:-/usr/bin/env bash -l}
+    # This means be careful running dr-shell from a script where the stdin is
+    # not associated with a keyboard (your terminal). If you start a
+    # long-running container process and the dr-shell command is aborted, the
+    # container process will continue to run.
+    docker exec -i $container "$@"
 fi

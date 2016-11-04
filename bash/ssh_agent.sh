@@ -128,7 +128,7 @@ function ssh-agent-stop {
 
 # Actually start the ssh-agent up
 if [[ $# -gt 0 ]]; then
-    ssh-agent-start $(tr ':' ' ' <<<$SSH_AGENT_IDS) $*
+    ssh-agent-start $(tr ':' ' ' <<<$SSH_AGENT_IDS) "$@"
 elif [[ -e ~/.ssh/id_rsa ]]; then
     ssh-agent-start $(tr ':' ' ' <<<$SSH_AGENT_IDS) ~/.ssh/id_rsa
 elif [[ -e ~/.ssh/id_dsa ]]; then

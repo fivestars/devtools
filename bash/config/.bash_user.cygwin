@@ -14,7 +14,7 @@ function set_title() {
 }
 
 function sub() {
-	(/cygdrive/c/Program\ Files/Sublime\ Text\ 2/sublime_text.exe $* &)
+	(/cygdrive/c/Program\ Files/Sublime\ Text\ 2/sublime_text.exe "$@" &)
 }
 
 function ssh() {

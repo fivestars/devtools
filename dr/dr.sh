@@ -164,23 +164,23 @@ function dr {
     local bare_commands=("boot" "env")
 
     if command -v dr_$cmd &>/dev/null; then
-        dr_$cmd $*
+        dr_$cmd "$@"
     elif command -v dr-$cmd &>/dev/null; then
-        dr-$cmd $*
+        dr-$cmd "$@"
     elif dr-using-machine && docker-machine env $cmd 2>&1 |
             grep -qv "Host does not exist"; then
         # They are trying to use the dr-env shorthand?
         dr_env $cmd
     else
         # Fall back to docker
-        docker $cmd $*
+        docker $cmd "$@"
     fi
 }
 
 # In case we want to call this script directly rather than sourcing it
 # (helpful when developing/debugging this script)
 if [[ $(basename -- $0) == $(basename -- $BASH_SOURCE) ]]; then
-    dr $*
+    dr "$@"
 fi
 
 # Export our dr function for use in sub-shells
