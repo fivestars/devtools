@@ -147,6 +147,10 @@ alias grep='grep --color'
 alias cb='clipboard'
 
 
+### Key bindings
+bind '"\e[A": history-search-backward'  # Up arrow
+bind '"\e[B": history-search-forward'   # Down arrow
+
 ### Sources
 # Get a better 'cd'
 . $LDIR/../cd.sh
@@ -275,11 +279,12 @@ if ! in_docker_container; then
     # PS1 Configuration
     . $LDIR/../ps1/ps1-success.sh
     . $LDIR/../ps1/ps1-docker.sh
+    . $LDIR/../ps1/ps1-hub.sh
 
     trap timer-start DEBUG
     PROMPT_COMMAND=timer-finish
 
-    export PS1='\n$TIMER_OUTPUT $(ps1-success)\[\e[1;33m\]\w$(ps1-git -l -s)\033[0;37m$(ps1-docker)\[\e[1;37m\]\n$\[\e[0m\] '
+    export PS1='\n$TIMER_OUTPUT $(ps1-success)\[\e[1;33m\]\w$(ps1-git -l -s) $(ps1-hub)\033[0;37m$(ps1-docker)\[\e[1;37m\]\n$\[\e[0m\] '
 
     # Docker utilities
     export PATH=${PATH}:$LDIR/../../dr
