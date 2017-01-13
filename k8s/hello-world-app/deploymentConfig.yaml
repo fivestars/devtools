@@ -1,0 +1,33 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: hello-world-app 
+  labels:
+    name: hello-world-app
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        deploymentconfig: hello-world-app 
+    spec:
+      strategy:
+        type: RollingUpdate
+      terminationGracePeriodSeconds: 50 
+      containers:
+      - env:
+        image: hello-world-app:dev
+        workingDir: /home/fivestars/hello-world-app 
+        name: hello-world-app
+        ports:
+        - containerPort: 7892 
+          protocol: TCP
+        resources:
+        volumeMounts:
+        - mountPath: "/home/fivestars/hello-world-app"
+          name: hello-world-app-pd
+      volumes:
+        - name: hello-world-app-pd
+          persistentVolumeClaim:
+           claimName: hello-world-app-persistentclaim 
+
