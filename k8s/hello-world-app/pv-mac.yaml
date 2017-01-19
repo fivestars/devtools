@@ -10,4 +10,4 @@ spec:
   accessModes:
   - ReadWriteOnce
   hostPath:
-    path: "/Users/fiveStars.user/fivestars/hello-world-app"
+    path: "/Users/fiveStars.user/fivestars/devtools/k8s/hello-world-app"
