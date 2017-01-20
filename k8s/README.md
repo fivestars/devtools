@@ -8,4 +8,6 @@ You can run `./check_prereqs.sh` to see if you have all the necessary things ins
 
 We also have a hello-world-app, which is a simple tornado project that you can run through minikube to verify that minikube is working:
 - `cd hello-world-app`
-- `./minikube-hello-world-app.sh`
+- `./minikube-hello-world-app.sh start`
+Once you have confirmed it is working correctly (Should get "Hello World" printed at the end of previous command), 
+- `./minikube-hello-world-app.sh stop`

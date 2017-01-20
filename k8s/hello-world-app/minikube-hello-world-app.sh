@@ -34,7 +34,8 @@ case $cmd in
 		timestamp
 		echo "Creating Kubernetes Persistent Volume and Claim objects... (fast)"
 		if [[ $OS == "Mac" ]]; then
-			kubectl create -f pv-mac.yaml
+			sed -e "s;%PATH%;$(pwd);g" pv.yaml.template > pv.yaml
+			kubectl create -f pv.yaml
 		elif [[ $OS == "Windows" ]]; then
 			kubectl create -f pv-windows.yaml
 		else 
