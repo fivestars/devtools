@@ -1,6 +1,7 @@
 #! /usr/bin/env bash
 
-echo Checking if necessary requirements are installed for minikube...
+echo "Checking if necessary requirements are installed for minikube... (Takes about 45-75 seconds)"
+minikube start >/dev/null
 vboxmanage >/dev/null
 if [ $? -eq 0 ]; then
     echo VirtualBox is installed with v$(vboxmanage --version)
