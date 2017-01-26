@@ -40,7 +40,7 @@ case $cmd in
 		echo
 		timestamp
 		echo Sleeping for 10 seconds before checking service is up and running...
-		sleep 0 # Let service get up and running before curling
+		sleep 10 # Let service get up and running before curling
 		echo
 		endpoint=$(minikube ip)$(kubectl get svc | grep hello-world-app | egrep -o ':\d{5}')
 		echo Curling ${endpoint}, which is where your hello world app is. 

@@ -9,5 +9,21 @@ You can run `./check_prereqs.sh` to see if you have all the necessary things ins
 We also have a hello-world-app, which is a simple tornado project that you can run through minikube to verify that minikube is working:
 - `cd hello-world-app`
 - `./minikube-hello-world-app.sh start`
-Once you have confirmed it is working correctly (Should get "Hello World" printed at the end of previous command), 
-- `./minikube-hello-world-app.sh stop`
+- Once you have confirmed it is working correctly (Should get "Hello World" printed at the end of previous command), you can stop the app and clean up everything by running `./minikube-hello-world-app.sh stop`
+
+Some helpful kubectl commands:
+- `kubectl get pods` shows all the pods.
+- `kubectl get svcs` shows all the services.
+- `kubectl get deploys` shows all the deployments.
+- `kubectl logs {pod name}` gives you the logs of a pod. Can follow the logs with the -f flag.
+- `kubectl describe pod {pod name}` gives you information about the pod. Kind of like inspect in docker.
+- `kubectl describe svc {svc name}` similar to above.
+- `kubectl describe deploy {deploy name}` similar to above.
+- `kubectl create -f {file name}` creates a kubernetes object (pod/svc/deploy) whose configuration is in {file name} yaml file.
+- `kubectl delete {kubernetes object type} {kubenetes object name}` deletes the kubernetes object with that name.
+- `kubectl port-forward {pod name} {local port}:{remote port}` forwards a local port to a pod.
+- `kubectl apply -f {file name}` applies a configuration change if {file name} yaml file has changed.
+
+More commands here can be found here: https://kubernetes.io/docs/user-guide/kubectl-overview/
+
+Sometimes, minikube gets into a weird state. To get out of this you can run `minikube delete`, and then try to run the script(s) to start your project again.
