@@ -1,7 +1,6 @@
 #! /usr/bin/env bash
 
-echo "Checking if necessary requirements are installed for minikube... (Takes about 45-75 seconds)"
-minikube start >/dev/null
+echo "Checking if necessary requirements are installed for minikube..."
 vboxmanage >/dev/null
 if [ $? -eq 0 ]; then
     echo VirtualBox is installed with v$(vboxmanage --version)
@@ -25,14 +24,14 @@ fi
 
 kubectl >/dev/null
 if [ $? -eq 0 ]; then
-    echo Kubectl is installed with $(kubectl version | grep -o -m 1 'v\d*\.\d*\.\d*') Need at least v1.0.0
+    echo Kubectl is installed with $(kubectl version --client | grep -o -m 1 'v\d*\.\d*\.\d*') Need at least v1.0.0
 else
     echo Please install Kubectl from https://kubernetes.io/docs/getting-started-guides/kubectl/
 fi
 
 git --version>/dev/null
 if [ $? -eq 0 ]; then
-    echo Git is installed with v$(git --version | grep -o '\d\.\d\.\d')
+    echo Git is installed with v$(git --version | grep -o '\d*\.\d*\.\d*')
 else
     echo Please install git from https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
 fi
